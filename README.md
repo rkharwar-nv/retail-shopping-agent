@@ -56,7 +56,9 @@ modules are scaffolded but not wired yet.
    ```sh
    cp config.example.yaml config.yaml
    cp .env.example .env
-   # edit .env and fill in the three NVIDIA_* keys
+   # edit .env and fill in the three ROLE*_API_KEY values
+   # (names are ROLE1_API_KEY, ROLE2_API_KEY, ROLE3_API_KEY —
+   #  see .env.example for which account each comes from)
    ```
 
 3. **Run tests** (sanity check — nothing calls the network):
