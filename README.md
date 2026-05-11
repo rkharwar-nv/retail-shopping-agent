@@ -74,7 +74,7 @@ modules are scaffolded but not wired yet.
    shopping-agent     # equivalent to: uvicorn shopping_agent.api.app:app
    ```
 
-   Service listens on `http://127.0.0.1:3000`. Open `/docs` in a
+   Service listens on `http://127.0.0.1:8000`. Open `/docs` in a
    browser for the auto-generated OpenAPI/Swagger UI.
 
 5. **Talk to it** from another terminal:
