@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from shopping_agent.config import AppConfig, load_config, verify_secrets
 from shopping_agent.conversation.state import SessionStore
+from shopping_agent.debug.trace import DebugTraceBuffer, init_trace_buffer
 from shopping_agent.events.bus import EventBus, build_bus
 from shopping_agent.gateway.role1_omni import Role1OmniAdapter
 
@@ -17,6 +18,10 @@ from shopping_agent.gateway.role1_omni import Role1OmniAdapter
 def get_config() -> AppConfig:
     cfg = load_config()
     verify_secrets(cfg)
+    # Initialize the debug trace buffer here so the Role 1 adapter's
+    # (lazy) call to get_trace_buffer() picks up an enabled instance
+    # before the first request lands.
+    init_trace_buffer(cfg.debug)
     return cfg
 
 
@@ -33,3 +38,10 @@ def get_role1() -> Role1OmniAdapter:
 @lru_cache(maxsize=1)
 def get_session_store() -> SessionStore:
     return SessionStore()
+
+
+def get_trace_buffer_dep() -> DebugTraceBuffer:
+    # Ensure config (and therefore the buffer) is initialized first.
+    get_config()
+    from shopping_agent.debug.trace import get_trace_buffer
+    return get_trace_buffer()

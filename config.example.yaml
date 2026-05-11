@@ -140,3 +140,10 @@ hooks:
   guardrails: noop               # passes input/output through
   profile: empty                 # returns empty profile
   consent: always_granted        # no prompt
+
+# Developer introspection. KEEP OFF in shared/prod environments —
+# traces contain raw prompts and raw model responses.
+debug:
+  enabled: true                  # turn on for dev / smoke workflow
+  buffer_size: 20                # entries per session kept in memory
+  ttl_seconds: 300               # entries evicted after 5 minutes

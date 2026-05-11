@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI
 
 from shopping_agent import __version__
-from shopping_agent.api.routes import chat, health, sessions
+from shopping_agent.api.routes import chat, debug, health, sessions
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(chat.router)
     app.include_router(sessions.router)
+    app.include_router(debug.router)
     return app
 
 

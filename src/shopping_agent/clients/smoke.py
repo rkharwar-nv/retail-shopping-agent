@@ -97,19 +97,49 @@ def _encode_image(image_path: Path) -> tuple[str, str]:
 
 
 def _run_one(client, base_url, ptype, image_path, timeout):
-    """Run one fixture. Returns a dict result."""
+    """Run one fixture. Returns a dict result + captured request/trace."""
     prompt = _load_prompt(image_path, ptype)
     b64, mime = _encode_image(image_path)
+    session_id = f"smoke-{ptype}-{image_path.stem}"
     payload = {
-        "session_id": f"smoke-{ptype}",
+        "session_id": session_id,
         "text": prompt,
         "images": [{"kind": "base64", "value": b64, "mime_type": mime}],
+    }
+    # Build a REQUEST-CAPTURE dict (omits base64 blob, keeps metadata
+    # so the .request.json stays readable).
+    import hashlib
+    img_sha = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    request_capture = {
+        "endpoint": f"POST {base_url}/chat",
+        "fixture": f"{ptype}/{image_path.name}",
+        "session_id": session_id,
+        "text_prompt": prompt,
+        "image": {
+            "path": str(image_path),
+            "mime_type": mime,
+            "size_bytes": image_path.stat().st_size,
+            "sha256": img_sha,
+        },
+        "perception_type_expected": ptype,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
     started = datetime.now(timezone.utc)
     try:
         resp = client.post(f"{base_url}/chat", json=payload, timeout=timeout)
         duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None
+
+        # Best-effort: pull the upstream trace for this session.
+        # Quiet-fails if debug is disabled or route 404s.
+        trace = None
+        try:
+            tr = client.get(f"{base_url}/debug/trace/{session_id}", timeout=10)
+            if tr.status_code == 200:
+                trace = tr.json()
+        except Exception:  # noqa: BLE001
+            pass
+
         return {
             "path": f"{ptype}/{image_path.name}",
             "expected_type": ptype,
@@ -118,6 +148,8 @@ def _run_one(client, base_url, ptype, image_path, timeout):
             "duration_ms": duration_ms,
             "status_code": resp.status_code,
             "body": body,
+            "request_capture": request_capture,
+            "trace": trace,
             "error": None if resp.status_code == 200 else f"http_{resp.status_code}",
         }
     except httpx.TimeoutException as e:
@@ -125,13 +157,15 @@ def _run_one(client, base_url, ptype, image_path, timeout):
         return {"path": f"{ptype}/{image_path.name}", "expected_type": ptype,
                 "actual_type": None, "perception_confidence": None,
                 "duration_ms": duration_ms, "status_code": None,
-                "body": None, "error": f"timeout: {e}"}
+                "body": None, "request_capture": request_capture, "trace": None,
+                "error": f"timeout: {e}"}
     except Exception as e:  # noqa: BLE001
         duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         return {"path": f"{ptype}/{image_path.name}", "expected_type": ptype,
                 "actual_type": None, "perception_confidence": None,
                 "duration_ms": duration_ms, "status_code": None,
-                "body": None, "error": f"{type(e).__name__}: {e}"}
+                "body": None, "request_capture": request_capture, "trace": None,
+                "error": f"{type(e).__name__}: {e}"}
 
 
 def _write_results(run_dir: Path, base_url: str, results: list[dict],
@@ -139,14 +173,22 @@ def _write_results(run_dir: Path, base_url: str, results: list[dict],
     """Save per-fixture JSON bodies, manifest.json, and summary.md."""
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Per-fixture response bodies.
+    # Per-fixture response bodies, request captures, and traces.
     for r in results:
         safe = r["path"].replace("/", "__")
-        body_path = run_dir / f"{safe}.json"
-        body_path.write_text(
+        (run_dir / f"{safe}.json").write_text(
             json.dumps(r["body"] or {"error": r["error"]}, indent=2),
             encoding="utf-8",
         )
+        (run_dir / f"{safe}.request.json").write_text(
+            json.dumps(r.get("request_capture") or {}, indent=2),
+            encoding="utf-8",
+        )
+        if r.get("trace"):
+            (run_dir / f"{safe}.trace.json").write_text(
+                json.dumps(r["trace"], indent=2),
+                encoding="utf-8",
+            )
 
     # manifest.json
     manifest = {
@@ -196,6 +238,9 @@ def _write_results(run_dir: Path, base_url: str, results: list[dict],
         body = r["body"]
         lines.append(f"### {r['path']} → {r.get('actual_type')} "
                      f"({r.get('perception_confidence')})")
+        rc = r.get("request_capture") or {}
+        if rc.get("text_prompt"):
+            lines.append(f"- **prompt:** {rc['text_prompt']}")
         if body.get("scene_summary"):
             lines.append(f"- **scene_summary:** {body['scene_summary']}")
         if body.get("user_intent_hint"):

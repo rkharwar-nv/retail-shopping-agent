@@ -98,6 +98,21 @@ class HooksConfig(BaseModel):
     consent: Literal["always_granted"] = "always_granted"
 
 
+class DebugConfig(BaseModel):
+    """In-memory upstream-call trace for developer introspection.
+
+    SECURITY: keep `enabled: false` in any shared or production
+    environment. Traces hold raw model prompts and raw model
+    responses — sensitive by default.
+    """
+
+    enabled: bool = False
+    # Max entries kept in the in-memory ring buffer per session.
+    buffer_size: int = 20
+    # Entries older than this are evicted on read.
+    ttl_seconds: int = 300
+
+
 class AppConfig(BaseModel):
     """Top-level application config. Loaded once at startup."""
 
@@ -107,6 +122,7 @@ class AppConfig(BaseModel):
     vector_store: VectorStoreConfig = VectorStoreConfig()
     catalog: CatalogConfig = CatalogConfig()
     hooks: HooksConfig = HooksConfig()
+    debug: DebugConfig = DebugConfig()
 
     @field_validator("schema_version")
     @classmethod

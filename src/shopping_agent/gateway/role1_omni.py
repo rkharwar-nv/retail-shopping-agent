@@ -389,4 +389,60 @@ class Role1OmniAdapter:
         self._events.publish(
             EV_MODEL_CALL_SUCCEEDED, **ev_common, duration_ms=duration_ms
         )
+
+        # Debug trace capture — only records if debug.enabled is true.
+        # Lives in memory; exposed via /debug/trace/<session_id>.
+        try:
+            from shopping_agent.debug.trace import get_trace_buffer
+
+            buf = get_trace_buffer()
+            if buf.enabled:
+                # Build a redacted copy of the messages for trace: keep
+                # system prompt + user text, summarize images/audio as
+                # metadata instead of serializing base64 blobs.
+                user_content_trace = []
+                for part in content:
+                    if part.get("type") == "text":
+                        user_content_trace.append(part)
+                    elif part.get("type") == "image_url":
+                        url = part.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            header = url.split(",", 1)[0]
+                            user_content_trace.append({
+                                "type": "image_url",
+                                "url_kind": "base64_data_url",
+                                "header": header,
+                                "approx_bytes": len(url),
+                            })
+                        else:
+                            user_content_trace.append({
+                                "type": "image_url", "url": url,
+                            })
+                    else:
+                        user_content_trace.append({"type": part.get("type", "?")})
+
+                buf.record(
+                    inp.session_id,
+                    {
+                        "turn_id": inp.turn_id,
+                        "role": self.role,
+                        "model_id": self._cfg.model_id,
+                        "provider": self._cfg.provider,
+                        "duration_ms": duration_ms,
+                        "system_prompt_assembled": _build_system_prompt(self._cfg),
+                        "user_message_trace": user_content_trace,
+                        "upstream_request": {
+                            k: v for k, v in call_kwargs.items() if k != "messages"
+                        },
+                        "upstream_response_raw": raw_text,
+                        "usage": (
+                            resp.usage.model_dump()
+                            if getattr(resp, "usage", None) else None
+                        ),
+                        "finish_reason": resp.choices[0].finish_reason,
+                    },
+                )
+        except Exception as trace_err:  # noqa: BLE001
+            log.debug("debug trace record failed: %s", trace_err)
+
         return result
