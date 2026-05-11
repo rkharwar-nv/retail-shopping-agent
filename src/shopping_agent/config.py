@@ -40,6 +40,11 @@ class PromptsConfig(BaseModel):
 
     role_instructions: str = ""
     style: str = ""
+    # Per-perception-type extraction emphasis. Keys should match
+    # PerceptionType values (pantry, shopping_list, food_label,
+    # fashion, cosmetics). All are optional — omit or leave blank
+    # to use the structural contract alone.
+    vertical_hints: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelRoleConfig(BaseModel):

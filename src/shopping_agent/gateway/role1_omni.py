@@ -38,50 +38,134 @@ from shopping_agent.events.schema import (
     EV_MODEL_CALL_SUCCEEDED,
 )
 from shopping_agent.gateway.base import (
+    CosmeticsPerception,
     DetectedItem,
+    FashionPerception,
+    FoodLabelPerception,
     ImageRef,
     ModelProviderError,
     ModelRequestError,
     ModelResponseError,
     ModelTimeoutError,
     MultimodalInput,
+    PantryPerception,
+    ShoppingListPerception,
     StructuredUnderstanding,
 )
 
 log = logging.getLogger(__name__)
 
 
-STRUCTURAL_OUTPUT_CONTRACT = """Respond ONLY with a JSON object of this shape (no prose, no code fences):
+STRUCTURAL_OUTPUT_CONTRACT = """First classify the user's input into exactly ONE perception_type:
+
+- "pantry":        food/ingredients/fridge/pantry photo — what the user HAS
+- "shopping_list": handwritten or printed list of items the user wants
+- "food_label":    nutrition panel, ingredient list, or packaging info panel
+- "fashion":       clothing, shoes, accessories, bags, jewelry
+- "cosmetics":     skincare, makeup, fragrance, or their labels
+- "unknown":       none of the above, or image too unclear
+
+Then populate ONLY the matching typed field. Leave the OTHER typed fields as null.
+Always populate scene_summary and user_intent_hint. Populate detected_items as a
+flat fallback list (name + source_modality + optional confidence).
+
+Respond ONLY with a JSON object of this exact shape (no prose, no code fences):
 
 {
-  "transcript": "string or null — any audio content transcribed",
+  "perception_type": "pantry" | "shopping_list" | "food_label" | "fashion" | "cosmetics" | "unknown",
+  "perception_confidence": 0.0 to 1.0 or null,
+
+  "pantry": null OR {
+    "items": [
+      {
+        "name": "string",
+        "quantity_hint": "string or null",
+        "brand": "string or null",
+        "freshness_hint": "string or null",
+        "category": "string or null",
+        "confidence": 0.0 to 1.0 or null
+      }
+    ],
+    "overall_coverage": "string or null",
+    "notable_gaps": ["strings"],
+    "suggested_recipe_hints": ["strings"]
+  },
+
+  "shopping_list": null OR {
+    "items": [
+      {
+        "raw_text": "string",
+        "normalized_name": "string or null",
+        "quantity": "string or null",
+        "category_hint": "string or null"
+      }
+    ],
+    "ambiguous_lines": ["strings"],
+    "legibility_score": 0.0 to 1.0 or null
+  },
+
+  "food_label": null OR {
+    "product_name": "string or null",
+    "brand": "string or null",
+    "serving_size": "string or null",
+    "calories_per_serving": integer or null,
+    "macros": { "protein": "5g", "...": "..." },
+    "ingredients_list": ["strings"],
+    "allergen_callouts": ["strings"],
+    "certifications": ["strings"]
+  },
+
+  "fashion": null OR {
+    "primary_item": {
+      "garment_type": "string",
+      "color": "string or null",
+      "pattern": "string or null",
+      "material_guess": "string or null",
+      "brand_visible": "string or null",
+      "style_descriptors": ["strings"],
+      "size_visible": "string or null"
+    },
+    "additional_items": [ ... same shape as primary_item ... ],
+    "occasion_hint": "string or null"
+  },
+
+  "cosmetics": null OR {
+    "product_type": "string or null",
+    "brand": "string or null",
+    "notes": "string or null"
+  },
+
+  "transcript": "string or null — from audio, if present",
   "detected_items": [
     {
-      "name": "string — product-like entity observed",
-      "source_modality": "image" | "text" | "audio",
+      "name": "string",
+      "source_modality": "image" | "audio" | "text",
       "confidence": 0.0 to 1.0 or null,
-      "attrs": { "any": "domain-specific fields" }
+      "attrs": {}
     }
   ],
-  "scene_summary": "string or null — 1-2 sentence summary of what you see/hear",
+  "scene_summary": "string — 1 to 2 sentences",
   "user_intent_hint": "string or null — best guess at what the user wants"
 }"""
 
 
 def _build_system_prompt(cfg: ModelRoleConfig) -> str:
-    """Assemble the system prompt from config fragments + the
-    structural output contract (kept in code, tied to the parser).
-
-    Order: role → structural contract → style. The structural
-    contract goes in the middle so the model sees it in context
-    of what role it's playing.
-    """
+    """Assemble the system prompt: role_instructions → structural
+    contract → vertical hints (all of them; model picks after
+    classifying) → style."""
     parts: list[str] = []
     role_instr = cfg.prompts.role_instructions.strip()
     style = cfg.prompts.style.strip()
+    hints = cfg.prompts.vertical_hints or {}
     if role_instr:
         parts.append(role_instr)
     parts.append(STRUCTURAL_OUTPUT_CONTRACT)
+    if hints:
+        hint_block = "Per-perception-type extraction guidance (use the one matching your classification):\n\n"
+        hint_block += "\n\n".join(
+            f"### {k} ###\n{v.strip()}" for k, v in hints.items() if v.strip()
+        )
+        parts.append(hint_block)
     if style:
         parts.append(style)
     return "\n\n".join(parts)
@@ -234,10 +318,51 @@ class Role1OmniAdapter:
 
         try:
             parsed = _extract_json(raw_text)
+
+            # Validate perception_type; anything unrecognized → "unknown".
+            perception_type = parsed.get("perception_type", "unknown")
+            valid_types = {
+                "pantry", "shopping_list", "food_label",
+                "fashion", "cosmetics", "unknown",
+            }
+            if perception_type not in valid_types:
+                log.warning(
+                    "Role1 unknown perception_type=%r, coercing to 'unknown'",
+                    perception_type,
+                )
+                perception_type = "unknown"
+
+            # Helper: only decode the typed payload matching the
+            # declared perception_type. The others are ignored even
+            # if the model accidentally populated them — the schema
+            # discriminator is our single source of truth.
+            def _typed(key: str, model_cls):
+                if perception_type != key:
+                    return None
+                block = parsed.get(key)
+                if not isinstance(block, dict):
+                    return None
+                try:
+                    return model_cls(**block)
+                except Exception as typed_e:  # noqa: BLE001
+                    log.warning(
+                        "Role1 typed payload %s failed to validate: %s",
+                        key, typed_e,
+                    )
+                    return None
+
             result = StructuredUnderstanding(
+                perception_type=perception_type,  # type: ignore[arg-type]
+                perception_confidence=parsed.get("perception_confidence"),
+                pantry=_typed("pantry", PantryPerception),
+                shopping_list=_typed("shopping_list", ShoppingListPerception),
+                food_label=_typed("food_label", FoodLabelPerception),
+                fashion=_typed("fashion", FashionPerception),
+                cosmetics=_typed("cosmetics", CosmeticsPerception),
                 transcript=parsed.get("transcript"),
                 detected_items=[
                     DetectedItem(**d) for d in parsed.get("detected_items", [])
+                    if isinstance(d, dict)
                 ],
                 scene_summary=parsed.get("scene_summary"),
                 user_intent_hint=parsed.get("user_intent_hint"),
@@ -252,6 +377,7 @@ class Role1OmniAdapter:
         except Exception as e:
             log.warning("Role1 JSON parse failed, falling back to raw: %s", e)
             result = StructuredUnderstanding(
+                perception_type="unknown",
                 scene_summary=raw_text[:2000],
                 raw_model_metadata={
                     "parse_error": str(e),

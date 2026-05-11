@@ -1,0 +1,53 @@
+# Copy this file to config.yaml and adjust as needed.
+# config.yaml is gitignored. Secrets (API keys) live in .env, not here.
+
+# Interface/schema version. Bump when breaking changes happen.
+schema_version: 1
+
+models:
+  role1:
+    # Multimodal input processing (image + audio + text).
+    provider: nvidia-build
+    base_url: https://integrate.api.nvidia.com/v1
+    model_id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+    api_key_env: ROLE1_API_KEY     # name of the env var to read
+    timeout_seconds: 30
+    max_retries: 2
+
+  role2:
+    # Reasoning + tool calling. Consumes role1's structured output.
+    provider: nvidia-inference
+    base_url: https://inference-api.nvidia.com/v1
+    model_id: nvidia/Nemotron-3-Super-120B-A12B
+    api_key_env: ROLE2_API_KEY
+    timeout_seconds: 60
+    max_retries: 2
+
+  role3:
+    # Text embeddings. Same host as role2; separate key for
+    # rotation/scope independence.
+    provider: nvidia-inference
+    base_url: https://inference-api.nvidia.com/v1
+    model_id: nvidia/llama-3.2-nv-embedqa-1b-v2
+    api_key_env: ROLE3_API_KEY
+    timeout_seconds: 15
+    max_retries: 2
+
+vector_store:
+  driver: pgvector
+  # connection_string_env: POSTGRES_URL   # uncomment when wiring up
+
+events:
+  sink: jsonl_file               # Phase 1 default
+  path: ./events/events.jsonl
+  non_blocking: true             # bus failure must not block turns
+
+catalog:
+  source: hybrid                 # public + synthetic
+  seed_size: 1000                # target products in Phase 1 catalog
+
+# Empty hooks — Phase 1 shapes without implementation
+hooks:
+  guardrails: noop               # passes input/output through
+  profile: empty                 # returns empty profile
+  consent: always_granted        # no prompt
