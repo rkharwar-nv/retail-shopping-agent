@@ -51,11 +51,7 @@ from shopping_agent.gateway.base import (
 log = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are the input-processing stage of a retail shopping agent.
-You receive the user's message (text, images, and/or audio transcription) and
-produce a structured understanding.
-
-Respond ONLY with a JSON object of this shape (no prose, no code fences):
+STRUCTURAL_OUTPUT_CONTRACT = """Respond ONLY with a JSON object of this shape (no prose, no code fences):
 
 {
   "transcript": "string or null — any audio content transcribed",
@@ -69,9 +65,26 @@ Respond ONLY with a JSON object of this shape (no prose, no code fences):
   ],
   "scene_summary": "string or null — 1-2 sentence summary of what you see/hear",
   "user_intent_hint": "string or null — best guess at what the user wants"
-}
+}"""
 
-Be concise. No editorial commentary."""
+
+def _build_system_prompt(cfg: ModelRoleConfig) -> str:
+    """Assemble the system prompt from config fragments + the
+    structural output contract (kept in code, tied to the parser).
+
+    Order: role → structural contract → style. The structural
+    contract goes in the middle so the model sees it in context
+    of what role it's playing.
+    """
+    parts: list[str] = []
+    role_instr = cfg.prompts.role_instructions.strip()
+    style = cfg.prompts.style.strip()
+    if role_instr:
+        parts.append(role_instr)
+    parts.append(STRUCTURAL_OUTPUT_CONTRACT)
+    if style:
+        parts.append(style)
+    return "\n\n".join(parts)
 
 
 def _image_to_data_url(ref: ImageRef) -> str:
@@ -142,9 +155,25 @@ class Role1OmniAdapter:
             content.append({"type": "text", "text": "(empty input)"})
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _build_system_prompt(self._cfg)},
             {"role": "user", "content": content},
         ]
+
+        gen = self._cfg.generation
+        # Build kwargs lazily — don't send None fields.
+        call_kwargs: dict[str, Any] = {
+            "model": self._cfg.model_id,
+            "messages": messages,
+            "temperature": gen.temperature,
+            "max_tokens": gen.max_tokens,
+        }
+        if gen.top_p is not None:
+            call_kwargs["top_p"] = gen.top_p
+        if gen.extras:
+            call_kwargs["extra_body"] = gen.extras
+        # NOTE: streaming not wired in Phase 1 even if config says true —
+        # we consume the full response synchronously. Streaming will be
+        # a follow-up when the UI renderer (U1) needs it.
 
         attempt = 0
         started = time.monotonic()
@@ -161,12 +190,7 @@ class Role1OmniAdapter:
         while True:
             attempt += 1
             try:
-                resp = await self._client.chat.completions.create(
-                    model=self._cfg.model_id,
-                    messages=messages,  # type: ignore[arg-type]
-                    temperature=0.2,
-                    max_tokens=800,
-                )
+                resp = await self._client.chat.completions.create(**call_kwargs)  # type: ignore[arg-type]
                 break
             except APITimeoutError as e:
                 if attempt > self._cfg.max_retries:

@@ -9,10 +9,37 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
+
+
+class GenerationConfig(BaseModel):
+    """Model-tuning knobs. Per-role overridable.
+
+    These are PROVIDER-AGNOSTIC knobs (temperature, top_p, max_tokens,
+    stream). Provider-specific fields (e.g. NVIDIA's reasoning flags)
+    live in `extras`, which is passed straight through to the provider
+    as `extra_body` if the adapter supports it.
+    """
+
+    temperature: float = 0.2
+    top_p: float | None = None
+    max_tokens: int = 800
+    stream: bool = False
+    # Provider-specific body extensions. Merged into the SDK call as-is.
+    # Keep this last — when we swap providers, the generic knobs stay
+    # but `extras` almost always changes.
+    extras: dict[str, Any] = Field(default_factory=dict)
+
+
+class PromptsConfig(BaseModel):
+    """Behavioral prompt fragments. The STRUCTURAL output contract
+    lives in code next to the parser — that's not config."""
+
+    role_instructions: str = ""
+    style: str = ""
 
 
 class ModelRoleConfig(BaseModel):
@@ -24,6 +51,8 @@ class ModelRoleConfig(BaseModel):
     api_key_env: str = Field(..., description="Env var holding the secret API key")
     timeout_seconds: int = 30
     max_retries: int = 2
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
 
     @property
     def api_key(self) -> str:

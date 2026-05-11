@@ -11,8 +11,35 @@ models:
     base_url: https://integrate.api.nvidia.com/v1
     model_id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
     api_key_env: ROLE1_API_KEY     # name of the env var to read
-    timeout_seconds: 30
+    timeout_seconds: 60
     max_retries: 2
+
+    # Tuning knobs. Defaults here match NVIDIA's canonical Omni
+    # example; override if you're experimenting.
+    generation:
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 32768           # reasoning models emit a LOT; keep headroom
+      stream: false               # set true for demos; false for API callers
+      extras:                     # passed through as NIM extra_body
+        chat_template_kwargs:
+          enable_thinking: true
+        reasoning_budget: 16384
+
+    # Behavioral prompt. The JSON output contract lives in code,
+    # not here — that's tied to the Pydantic parser and must not
+    # drift. What belongs here is the role + style you want the
+    # model to adopt.
+    prompts:
+      role_instructions: |
+        You are the input-processing stage of a retail shopping agent.
+        Your job is to perceive what the user is showing, saying, or
+        asking about — especially pantry items, grocery products,
+        brand labels, and cooking-related intent. Ignore background
+        objects and details unrelated to shopping or meal planning.
+      style: |
+        Be concise. No emojis. No editorial commentary. No code
+        fences in your response.
 
   role2:
     # Reasoning + tool calling. Consumes role1's structured output.
@@ -22,6 +49,9 @@ models:
     api_key_env: ROLE2_API_KEY
     timeout_seconds: 60
     max_retries: 2
+    generation:
+      temperature: 0.4
+      max_tokens: 4096
 
   role3:
     # Text embeddings. Same host as role2; separate key for
