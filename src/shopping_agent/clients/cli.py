@@ -22,7 +22,7 @@ from rich.pretty import Pretty
 app = typer.Typer(help="Shopping Agent CLI (talks to local service).")
 console = Console()
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_BASE_URL = "http://127.0.0.1:3000"
 
 
 def _post_chat(

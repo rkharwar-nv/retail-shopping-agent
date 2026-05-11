@@ -46,7 +46,7 @@ Published: https://github.com/rkharwar-nv/retail-shopping-agent
 6. `cp .env.example .env`
 7. Fill in the three NVIDIA keys in `.env`
 8. `set -a; source .env; set +a`
-9. `shopping-agent`  (uvicorn on http://127.0.0.1:8000)
+9. `shopping-agent`  (uvicorn on http://127.0.0.1:3000)
 10. In another terminal:
     - `sa-cli health`
     - `sa-cli chat --text "hello" --once`
