@@ -36,6 +36,9 @@ sa-smoke = "shopping_agent.clients.smoke:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+shopping_agent = ["static/*", "static/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

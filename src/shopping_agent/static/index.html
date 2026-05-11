@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopping Agent — Dev Inspector</title>
+  <link rel="stylesheet" href="/ui/static/styles.css">
+</head>
+<body>
+  <header>
+    <h1>Shopping Agent · Dev Inspector</h1>
+    <div class="tagline">Role 1 perception · not the product UI · localhost dev only</div>
+  </header>
+
+  <main>
+    <!-- INPUT PANEL -->
+    <section class="panel" id="panel-input">
+      <h2>Input</h2>
+
+      <div class="field">
+        <label for="fixture-select">Load a fixture (optional)</label>
+        <select id="fixture-select">
+          <option value="">— choose a fixture —</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Or drop / choose an image</label>
+        <div id="dropzone" class="dropzone">
+          <span class="dz-placeholder">drag &amp; drop image, or click to pick</span>
+          <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.webp" hidden>
+          <img id="preview" alt="" style="display:none;">
+        </div>
+        <div class="file-meta" id="file-meta"></div>
+      </div>
+
+      <div class="field">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" rows="3" placeholder="What do I have here? What can I make?"></textarea>
+      </div>
+
+      <div class="field field-inline">
+        <label for="session-id">Session ID</label>
+        <input type="text" id="session-id" value="">
+        <button type="button" id="new-session" title="Generate a new session ID">↻</button>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="submit-btn" class="primary">Send →</button>
+        <span id="status" class="status"></span>
+      </div>
+    </section>
+
+    <!-- RESPONSE PANEL -->
+    <section class="panel" id="panel-response">
+      <h2>Parsed response</h2>
+      <div id="response-empty" class="empty">Submit an input to see the parsed response.</div>
+      <div id="response-content" style="display:none;">
+        <div class="perception-header">
+          <div class="ptype-badge" id="ptype-badge">—</div>
+          <div class="ptype-conf" id="ptype-conf"></div>
+        </div>
+        <div class="kv"><span class="k">scene_summary</span><span class="v" id="v-scene"></span></div>
+        <div class="kv"><span class="k">user_intent_hint</span><span class="v" id="v-intent"></span></div>
+        <div id="typed-section"></div>
+        <details>
+          <summary>detected_items (generic)</summary>
+          <ul id="detected-items"></ul>
+        </details>
+        <details>
+          <summary>other fields</summary>
+          <pre id="other-fields"></pre>
+        </details>
+      </div>
+    </section>
+
+    <!-- TRACE PANEL -->
+    <section class="panel" id="panel-trace">
+      <h2>Upstream trace <span class="trace-hint">(from /debug/trace)</span></h2>
+      <div id="trace-empty" class="empty">Trace will appear here after a call.</div>
+      <div id="trace-content" style="display:none;"></div>
+    </section>
+  </main>
+
+  <footer>
+    <div>
+      <a href="/docs" target="_blank">/docs</a> ·
+      <a href="/readyz" target="_blank">/readyz</a> ·
+      specs in <code>specs/</code>
+    </div>
+  </footer>
+
+  <script src="/ui/static/app.js"></script>
+</body>
+</html>
