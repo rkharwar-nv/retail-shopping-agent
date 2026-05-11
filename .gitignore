@@ -1,0 +1,50 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# Real config with filled values — only .example files go in
+config.yaml
+config.yml
+config.toml
+
+# Confidential source material — NVIDIA PRD is marked CONFIDENTIAL
+Retail_Shopping_Agent_PRD.docx
+Retail_Shopping_Agent_PRD.pdf
+/tmp/prd.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+/tmp/prdvenv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Vector store / data artifacts
+*.db
+*.sqlite
+.pgvector-data/
+catalog-index/
+
+# Logs / local event bus output
+*.log
+events/*.jsonl
