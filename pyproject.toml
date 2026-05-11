@@ -31,6 +31,7 @@ dev = [
 [project.scripts]
 shopping-agent = "shopping_agent.api.app:main"
 sa-cli = "shopping_agent.clients.cli:main"
+sa-smoke = "shopping_agent.clients.smoke:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -48,3 +48,7 @@ catalog-index/
 # Logs / local event bus output
 *.log
 events/*.jsonl
+
+# Smoke runs — exploratory, gitignored. Bless good ones with
+# `sa-smoke promote <run_id> <tag>` to copy into smoke/canonical/.
+smoke/runs/
