@@ -9,7 +9,15 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from shopping_agent import __version__
-from shopping_agent.api.routes import chat, debug, fixtures, health, sessions, ui
+from shopping_agent.api.routes import (
+    chat,
+    debug,
+    events_stream,
+    fixtures,
+    health,
+    sessions,
+    ui,
+)
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(sessions.router)
     app.include_router(debug.router)
+    app.include_router(events_stream.router)
     app.include_router(fixtures.router)
     app.include_router(ui.router)
     # Mount static files at /ui/static so index.html can reference

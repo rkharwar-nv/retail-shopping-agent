@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from shopping_agent.config import EventsConfig
+from shopping_agent.events.broadcaster import BroadcastSink
 from shopping_agent.events.schema import Event
 from shopping_agent.events.sinks.jsonl import JsonlFileSink
 
@@ -32,6 +33,13 @@ class EventBus:
 
     def __init__(self, sink: Sink) -> None:
         self._sink = sink
+
+    @property
+    def broadcaster(self) -> BroadcastSink | None:
+        """Returns the BroadcastSink wrapper if one is in use, else None."""
+        if isinstance(self._sink, BroadcastSink):
+            return self._sink
+        return None
 
     def publish(
         self,
@@ -59,11 +67,14 @@ class EventBus:
 
 
 def build_bus(cfg: EventsConfig) -> EventBus:
-    """Factory: wire up the right sink per config."""
+    """Factory: wire up the right sink per config, wrapped in a
+    BroadcastSink so SSE + stats subscribers can observe everything."""
     if cfg.sink == "jsonl_file":
-        return EventBus(JsonlFileSink(cfg.path))
-    if cfg.sink == "stdout":
-        return EventBus(_StdoutSink())
-    if cfg.sink == "null":
-        return EventBus(_NullSink())
-    raise ValueError(f"Unknown events sink: {cfg.sink}")
+        inner: Sink = JsonlFileSink(cfg.path)
+    elif cfg.sink == "stdout":
+        inner = _StdoutSink()
+    elif cfg.sink == "null":
+        inner = _NullSink()
+    else:
+        raise ValueError(f"Unknown events sink: {cfg.sink}")
+    return EventBus(BroadcastSink(inner))

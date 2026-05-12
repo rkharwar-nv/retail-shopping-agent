@@ -1,127 +1,194 @@
-# Lesson 1 — Dev Inspector UI
+# Lesson 1 — Dev Inspector UI (v2: Chat Experience)
 
-**Status:** draft v1 · **Owner:** PM + platform team
+**Status:** draft v2 (supersedes v1 inspector-only design)
+**Owner:** PM + platform team
 **Related specs:** LESSON-1-M0-MODEL-GATEWAY, LESSON-1-SMOKE
 
 ---
 
 ## 1. Purpose
 
-A single-page developer inspector served by the FastAPI service at
-`/ui`. Purposes, in priority order:
+A single-page chat experience at `/ui` that:
 
-1. **Working tool while tuning** — load an image, submit a prompt,
-   see perception_type + typed payload + raw Omni response without
-   leaving the browser.
-2. **Demoable surface** — share a screen / URL to show stakeholders
-   the system in motion without building a product UI prematurely.
-3. **Trace browser** — inspect `/debug/trace/<session>` entries next
-   to the parsed response, so prompt regressions are visible live.
+1. **Looks like a chat** — bubble-style message list, composer with
+   file + text input. Stakeholders recognize it as a chatbot.
+2. **Renders each perception type richly** — pantry, shopping_list,
+   food_label, fashion, cosmetics, unknown each get a purpose-built
+   card, not a generic JSON dump.
+3. **Shows the agent working** — a live "Agent Activity" panel
+   displays LLM calls per model, tokens, latency, agents/sub-agents
+   active, and a per-turn timeline. The panel is DESIGNED to grow
+   as Role 2 + specialists come online.
+4. **Preserves debuggability** — the old inspector (system prompt,
+   raw upstream response, trace) is accessible as a drawer from
+   the chat UI, not a separate route.
 
-This is **not** the end-user product UI. The shopper-facing
-conversational experience is a future lesson; building it now would
-couple the UI to a backend that is still growing specialists, cart,
-and catalog pieces.
+The UI is NVIDIA-branded (green #76B900 / black / white / gray
+palette) using Open Sans + JetBrains Mono. It is NOT a product UI
+for end shoppers; it is a technical demo + working dev tool.
 
 ## 2. Domain Generality Analysis
 
-The inspector renders **structurally** from the response JSON. New
-perception types or new typed fields appear in the UI without code
-changes because the renderer walks the object. Fashion-testable,
-cosmetics-honest by construction.
+| Aspect              | Shape                                      | Grocery Phase 1 | Fashion (future) | Cosmetics (future) |
+| ------------------- | ------------------------------------------ | --------------- | ---------------- | ------------------ |
+| message rendering   | one card component per perception_type     | 3 cards live    | 1 card ready     | 1 card ready       |
+| fixture dropdown    | reads `/fixtures/list` (dev-gated)          | pantry/list/label fixtures | fashion fixtures drop in | cosmetics fixtures drop in |
+| activity panel      | reads events + SSE stream, renders slots   | Role 1 only     | adds fashion specialist | adds cosmetics specialist |
+| agent roster        | list of active agents + sub-agents         | Role 1          | + Role 2 + specialists | + Role 2 + specialists |
 
-| Aspect                | Shape                              | Grocery Phase 1 | Fashion (future) | Cosmetics (future) |
-| --------------------- | ---------------------------------- | --------------- | ---------------- | ------------------ |
-| payload rendering     | generic JSON walker with section   | pantry/list/label render    | fashion renders   | cosmetics renders |
-| fixture dropdown      | reads `/fixtures/list` route       | populated       | populated when added | populated when added |
-| trace panel           | reads `/debug/trace/<session_id>`  | same            | same             | same               |
+## 3. Scope — v2 IN / OUT
 
-## 3. Scope — IN / OUT
+**IN v2 (this push):**
+- Chat-bubble layout, multi-turn backbone (SessionStore-backed)
+- Image + text input (image alone allowed; text alone allowed)
+- Per-perception-type rich card renderers
+- Activity panel: per-turn + session-aggregate counters
+- Live updates via SSE (`/events/stream/<session_id>`)
+- Inspector drawer (trace view of last upstream call)
+- NVIDIA brand colors + typography
+- Fixture dropdown (dev-only, from /fixtures/list)
 
-**IN v1:**
-- Drag-drop or file-picker for one image
-- Free-text prompt input
-- Session-id field (auto-generated UUID, editable)
-- "Run fixture" dropdown populated from `smoke/fixtures/*/`
-- Submit button posts to `/chat`
-- Parsed response panel (perception_type, confidence, typed payload,
-  detected_items, scene_summary, user_intent_hint)
-- Trace panel: collapsible sections for system prompt, raw upstream
-  response, usage, finish_reason, duration
-- Loading indicator (Omni is slow; ~10-60s per call)
-- Non-2xx status surfaced clearly
+**DEFERRED:**
+- Audio upload (will land after chat is solid — user's sequencing)
+- Video upload (Phase 2 of PRD)
+- Agent decision loop (question-router) — Lesson 2
+- Role 2 reasoning — Lesson 3
+- Catalog resolution / product cards — Lesson N
+- Authentication — production concern
 
-**OUT v1:**
-- Multi-turn / conversation history
-- Audio upload
-- Event-stream sidebar (events.jsonl live tail)
-- Promote-to-canonical button (sa-smoke CLI covers this)
-- Product cards, recipe cards, cart, checkout
-- Authentication / multi-user (localhost-only assumption)
+## 4. Multi-turn semantics (v2)
 
-## 4. Endpoints used / added
+For v2 the UI renders conversation structure and SessionStore
+persists prior turns, but Role 1 (perception) does not reason
+over history. Why:
 
-| Method | Path                          | New? | Purpose                          |
-| ------ | ----------------------------- | ---- | -------------------------------- |
-| GET    | `/ui`                         | new  | Serves `index.html`              |
-| GET    | `/ui/static/*`                | new  | Serves static assets             |
-| GET    | `/fixtures/list`              | new  | Lists smoke fixtures             |
-| GET    | `/fixtures/load/<type>/<name>`| new  | Returns base64 of a fixture      |
-| POST   | `/chat`                       | exist| Main call                        |
-| GET    | `/debug/trace/<session_id>`   | exist| Upstream call capture            |
+- Role 1 is a perception model; conversation is Role 2's job.
+- Wiring the **history delivery backbone** now means when Role 2
+  lands, it just reads `session.turns` — no UI or storage change.
+- Each Role 1 call still acts on the new image+text. Previous
+  turns are included as a "session summary" prefix in the system
+  prompt (not as full conversation context).
 
-`/fixtures/*` is dev-only: gated off `config.debug.enabled` like the
-trace route. Returns 404 when debug is disabled so the endpoint
-doesn't leak in prod.
+This is deliberately limited and documented so it doesn't
+surprise downstream lessons.
 
-## 5. File layout
+## 5. Endpoints used / added
 
-```
-src/shopping_agent/
-  api/routes/
-    ui.py                   # 2 routes: /ui, /ui/static/*
-    fixtures.py             # GET /fixtures/list, /fixtures/load/...
-  static/
-    index.html
-    app.js
-    styles.css
-```
+| Method | Path                                | Status   | Purpose                          |
+| ------ | ----------------------------------- | -------- | -------------------------------- |
+| GET    | `/ui`                               | existing | Chat shell (redesigned)          |
+| GET    | `/ui/static/*`                      | existing | Static assets                    |
+| POST   | `/chat`                             | existing | Message submission               |
+| GET    | `/sessions/{sid}`                   | existing | Full turn history                |
+| GET    | `/sessions/{sid}/stats`             | **new**  | Aggregated counters (calls, tokens, latency) |
+| GET    | `/events/stream/{sid}`              | **new**  | Server-Sent Events for live UI   |
+| GET    | `/fixtures/list`                    | existing | Dev fixture browser              |
+| GET    | `/fixtures/load/...`                | existing | Load fixture as base64           |
+| GET    | `/debug/trace/{sid}`                | existing | Raw upstream call capture        |
 
-Static files are packaged with the wheel via `package_data` — when
-the service is installed, `/ui` works out of the box.
+`/sessions/{sid}/stats` and `/events/stream/{sid}` are both
+dev-gated off `config.debug.enabled` like the trace route.
 
-## 6. Renderer design — structural, not typed
+## 6. Activity panel data contract
 
-```javascript
-renderPayload(body) {
-  // 1. Always show: perception_type, confidence, scene_summary,
-  //    user_intent_hint, detected_items count.
-  // 2. Look at body[body.perception_type] — if present, render its
-  //    fields generically (section per key, list rendering for
-  //    arrays, key/value grid for objects).
-  // 3. Unknown keys appear at the bottom under "other fields" —
-  //    visible but not prominent.
+The panel reads from `/sessions/{sid}/stats` on load and then
+subscribes to `/events/stream/{sid}` for live updates. Shape:
+
+```json
+{
+  "session_id": "sess-abc123",
+  "turns": 2,
+  "calls_by_model": {
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
+      "calls": 3,
+      "prompt_tokens": 1204,
+      "completion_tokens": 3841,
+      "reasoning_tokens": 2106,
+      "total_latency_ms": 42600
+    }
+  },
+  "calls_by_role": {
+    "role1": 3
+  },
+  "agents_active": ["role1"],
+  "sub_agents": [],
+  "timeline": [
+    {"t_ms": 0,     "event": "user.submit",       "turn_id": "t-1"},
+    {"t_ms": 120,   "event": "role1.start",       "turn_id": "t-1"},
+    {"t_ms": 14320, "event": "role1.done",        "turn_id": "t-1",
+     "duration_ms": 14200}
+  ]
 }
 ```
 
-A new field on `pantry` (say, `dietary_flags`) appears automatically.
-A new perception type (say, `cosmetics`) renders via the same walker
-once the backend starts populating it. UI does not need to know the
-schema ahead of time.
+Schema is additive. Fields that don't exist yet (Role 2 aggregates,
+specialist rollups) just appear when those roles come online.
 
-## 7. Open questions
+## 7. SSE event stream contract
 
-- **Q-UI-1:** Should the inspector persist recent runs to localStorage?
-  Leaning **yes** — cheap, lets you compare "this run" vs "previous"
-  without backend state. v2.
-- **Q-UI-2:** Should fixture image preview render inline?
-  Leaning **yes** for v1 — part of the input panel.
-- **Q-UI-3:** Do we auto-refresh the trace panel after submit?
-  Yes — fetch trace in the same tick we render the chat response.
+`GET /events/stream/<sid>` emits Server-Sent Events. Each event
+is a JSON object matching one of the existing bus event types
+(EV_MODEL_CALL_STARTED, EV_MODEL_CALL_SUCCEEDED, EV_MODEL_CALL_FAILED,
+EV_TURN_STARTED, EV_TURN_COMPLETED). The stream is scoped to the
+session — events from other sessions are filtered server-side.
 
-## 8. Non-goals (explicit)
+Client reconnection is handled by the browser natively; no replay
+on reconnect in v2 (last-event-id is v3 work).
 
-This UI is **not**:
-- A replacement for `sa-smoke` (batch + scripted)
-- A replacement for the FastAPI `/docs` Swagger (API contract viewer)
-- A production surface (no auth, no CSRF, localhost scope)
+## 8. Renderer design — per-perception cards
+
+Each perception type has its own renderer function. Dispatch:
+
+```javascript
+const RENDERERS = {
+  pantry:        renderPantryCard,
+  shopping_list: renderShoppingListCard,
+  food_label:    renderFoodLabelCard,
+  fashion:       renderFashionCard,
+  cosmetics:     renderCosmeticsCard,
+  unknown:       renderUnknownCard,
+};
+```
+
+Each renderer takes the typed payload + common fields (scene_summary,
+user_intent_hint) and returns a DOM fragment shaped for that domain:
+
+- pantry: items list + "what's missing" section + suggested uses
+- shopping_list: transcribed list + ambiguous lines called out
+- food_label: nutrition-facts-style grid + ingredients list +
+  allergens callout
+- fashion: garment attributes column + style descriptors
+- cosmetics: product identity + attributes
+- unknown: scene summary prominent + raw detected_items list
+
+Each card has a small "show raw JSON" expander at the bottom so
+nothing is hidden.
+
+## 9. NVIDIA branding
+
+Colors:
+- NVIDIA Green `#76B900` — primary, accents, CTAs
+- Black `#000000` — top nav, emphasis text
+- White `#FFFFFF` — card surfaces
+- Light gray `#F7F7F7` — app background
+- Medium gray `#767676` — secondary text
+- Dark gray `#333333` — body text
+
+Typography:
+- Open Sans (public web fallback for NVIDIA Sans)
+- JetBrains Mono for code, traces, timestamps
+
+No actual NVIDIA logo asset bundled. A styled green accent square
+(CSS-only) signals the brand.
+
+## 10. Open questions
+
+- **Q-UI-4:** Where does the "new turn" boundary get drawn when
+  the user uploads a new image mid-conversation? Leaning: every
+  submit = a new turn.
+- **Q-UI-5:** Should the inspector drawer close on new turn or
+  persist?  Leaning: persist; user explicitly closes it.
+- **Q-UI-6:** SSE vs WebSocket — SSE is simpler and fits one-way
+  server→client. Going SSE for v2; revisit if we need bidirectional
+  (cancellation, user-side streams) later.
+
