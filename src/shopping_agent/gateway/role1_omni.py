@@ -51,7 +51,12 @@ from shopping_agent.gateway.base import (
     PantryPerception,
     ShoppingListPerception,
     StructuredUnderstanding,
+    VideoRef,
 )
+
+# Max decoded-bytes for a single video. Higher than the image cap because
+# even short MP4 clips are large; the model server samples server-side.
+_VIDEO_MAX_DECODED_BYTES = 25 * 1024 * 1024
 
 log = logging.getLogger(__name__)
 
@@ -184,6 +189,30 @@ def _image_to_data_url(ref: ImageRef) -> str:
     raise ValueError(f"Unknown image ref kind: {ref.kind}")
 
 
+def _video_to_data_url(ref: VideoRef) -> tuple[str, int]:
+    """Build a data URL for a video and return (url, decoded_bytes).
+
+    Mirrors _image_to_data_url but for videos. The server-side NIM
+    samples frames (fps=2, num_frames=256), so we just hand it the
+    encoded MP4 bytes inline."""
+    if ref.kind == "url":
+        # Remote URL — we don't fetch to measure, so byte count is 0.
+        return ref.value, 0
+    if ref.kind == "path":
+        data = Path(ref.value).read_bytes()
+        decoded_bytes = len(data)
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"data:{ref.mime_type};base64,{b64}", decoded_bytes
+    if ref.kind == "base64":
+        # Compute decoded size without re-encoding.
+        try:
+            decoded_bytes = len(base64.b64decode(ref.value, validate=False))
+        except Exception:
+            decoded_bytes = (len(ref.value) * 3) // 4
+        return f"data:{ref.mime_type};base64,{ref.value}", decoded_bytes
+    raise ValueError(f"Unknown video ref kind: {ref.kind}")
+
+
 def _extract_json(text: str) -> dict[str, Any]:
     """Models sometimes wrap JSON in prose or code fences. Be forgiving."""
     # strip code fences if present
@@ -214,7 +243,15 @@ class Role1OmniAdapter:
         )
 
     async def process(self, inp: MultimodalInput) -> StructuredUnderstanding:
+        # Single video per turn — reject anything else loudly.
+        if len(inp.videos) > 1:
+            raise ModelRequestError(
+                f"only one video per turn supported, got {len(inp.videos)}"
+            )
+
         # Assemble OpenAI-style multimodal content blocks.
+        # Order: text → images → videos → audio. Videos follow the
+        # NVIDIA NIM `video_url` content-block convention.
         content: list[dict[str, Any]] = []
         if inp.text:
             content.append({"type": "text", "text": inp.text})
@@ -223,6 +260,21 @@ class Role1OmniAdapter:
                 {
                     "type": "image_url",
                     "image_url": {"url": _image_to_data_url(img)},
+                }
+            )
+        video_total_bytes = 0
+        for vid in inp.videos:
+            url, decoded_bytes = _video_to_data_url(vid)
+            if decoded_bytes > _VIDEO_MAX_DECODED_BYTES:
+                raise ModelRequestError(
+                    f"video too large: {decoded_bytes} bytes exceeds "
+                    f"{_VIDEO_MAX_DECODED_BYTES} byte cap"
+                )
+            video_total_bytes += decoded_bytes
+            content.append(
+                {
+                    "type": "video_url",
+                    "video_url": {"url": url},
                 }
             )
         if inp.audio:
@@ -418,6 +470,20 @@ class Role1OmniAdapter:
                             user_content_trace.append({
                                 "type": "image_url", "url": url,
                             })
+                    elif part.get("type") == "video_url":
+                        url = part.get("video_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            header = url.split(",", 1)[0]
+                            user_content_trace.append({
+                                "type": "video_url",
+                                "url_kind": "base64_data_url",
+                                "header": header,
+                                "approx_bytes": len(url),
+                            })
+                        else:
+                            user_content_trace.append({
+                                "type": "video_url", "url": url,
+                            })
                     else:
                         user_content_trace.append({"type": part.get("type", "?")})
 
@@ -431,6 +497,9 @@ class Role1OmniAdapter:
                         "duration_ms": duration_ms,
                         "system_prompt_assembled": _build_system_prompt(self._cfg),
                         "user_message_trace": user_content_trace,
+                        "image_count": len(inp.images),
+                        "video_count": len(inp.videos),
+                        "video_total_bytes": video_total_bytes,
                         "upstream_request": {
                             k: v for k, v in call_kwargs.items() if k != "messages"
                         },

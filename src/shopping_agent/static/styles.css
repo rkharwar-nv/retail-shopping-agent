@@ -1174,6 +1174,25 @@ textarea:focus-visible,
 
 .footer a:hover { color: var(--nv-green); }
 
+/* ─── Inline video bubble + agent error-card variant ────────── */
+
+.message.user video,
+.message.user .user-video {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  display: block;
+  background: #000;
+}
+
+.message.agent.error-card {
+  background: var(--red-soft);
+  border-left-color: var(--red);
+}
+.message.agent.error-card .role-tag {
+  color: var(--red);
+}
+
 /* ─── Responsive: stack < 900px ─────────────────────────────── */
 
 @media (max-width: 900px) {

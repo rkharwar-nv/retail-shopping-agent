@@ -29,6 +29,7 @@ from shopping_agent.gateway.base import (
     ImageRef,
     MultimodalInput,
     StructuredUnderstanding,
+    VideoRef,
 )
 from shopping_agent.gateway.role1_omni import Role1OmniAdapter
 
@@ -40,6 +41,7 @@ class ChatRequest(BaseModel):
     text: str | None = None
     images: list[ImageRef] = Field(default_factory=list)
     audio: AudioRef | None = None
+    videos: list[VideoRef] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -75,6 +77,7 @@ async def chat(
         has_text=bool(req.text),
         image_count=len(req.images),
         has_audio=req.audio is not None,
+        video_count=len(req.videos),
     )
 
     inp = MultimodalInput(
@@ -83,6 +86,7 @@ async def chat(
         text=req.text,
         images=req.images,
         audio=req.audio,
+        videos=req.videos,
     )
 
     understanding = await role1.process(inp)

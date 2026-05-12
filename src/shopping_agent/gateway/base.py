@@ -29,6 +29,13 @@ class AudioRef(BaseModel):
     mime_type: str = "audio/wav"
 
 
+class VideoRef(BaseModel):
+    """Reference to a video — URL, local path, or base64."""
+    kind: Literal["url", "path", "base64"]
+    value: str
+    mime_type: str = "video/mp4"
+
+
 class MultimodalInput(BaseModel):
     """Payload sent to Role 1 (multimodal input adapter)."""
     session_id: str
@@ -36,6 +43,7 @@ class MultimodalInput(BaseModel):
     text: str | None = None
     images: list[ImageRef] = Field(default_factory=list)
     audio: AudioRef | None = None
+    videos: list[VideoRef] = Field(default_factory=list)
 
 
 class DetectedItem(BaseModel):

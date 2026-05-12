@@ -10,11 +10,14 @@
   const state = {
     sessionId: null,
     image: null,                // {base64, mime_type, name, size}
+    video: null,                // {base64, mime_type, name, size, duration_s?}
     sse: null,                  // EventSource
     lastTurnId: null,
     activeRoles: new Set(),
     submitting: false,
   };
+
+  const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 
   // ─── small utils ──────────────────────────────────────────
   function uuid() {
@@ -179,15 +182,39 @@
   // compatibility but hidden in CSS — the chat bubble (rendered in
   // renderUserMessage) is where the actual image thumbnail appears.
   function showPreview() {
-    if (!state.image) return;
     $("preview-img").removeAttribute("src");
-    $("preview-name").textContent =
-      `📎 ${state.image.name} · ${fmtBytes(state.image.size)}`;
-    $("composer-preview").hidden = false;
+    if (state.video) {
+      const v = state.video;
+      const parts = [
+        `🎬 ${v.name}`,
+        fmtBytes(v.size),
+      ];
+      if (v.duration_s != null && isFinite(v.duration_s)) {
+        parts.push(fmtDuration(v.duration_s));
+      }
+      $("preview-name").textContent = parts.join(" · ");
+      $("composer-preview").hidden = false;
+      return;
+    }
+    if (state.image) {
+      $("preview-name").textContent =
+        `📎 ${state.image.name} · ${fmtBytes(state.image.size)}`;
+      $("composer-preview").hidden = false;
+      return;
+    }
+    $("composer-preview").hidden = true;
+  }
+
+  function fmtDuration(sec) {
+    const s = Math.round(Number(sec) || 0);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${String(r).padStart(2, "0")}`;
   }
 
   function clearPreview() {
     state.image = null;
+    state.video = null;
     $("preview-img").removeAttribute("src");
     $("preview-name").textContent = "";
     $("composer-preview").hidden = true;
@@ -196,14 +223,25 @@
 
   function readFile(file) {
     if (!file) return;
-    if (!file.type || !file.type.startsWith("image/")) {
-      setStatus(`not an image: ${file.type || "unknown"}`, "error");
+    const ftype = file.type || "";
+    if (ftype.startsWith("image/")) {
+      readImageFile(file);
       return;
     }
+    if (ftype === "video/mp4") {
+      readVideoFile(file);
+      return;
+    }
+    setStatus(`unsupported file type: ${ftype || "unknown"}`, "error");
+  }
+
+  function readImageFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = String(e.target.result || "");
       const b64 = dataUrl.split(",", 2)[1] || "";
+      // Single-attachment rule: picking an image clears any video.
+      state.video = null;
       state.image = {
         base64: b64,
         mime_type: file.type || "image/jpeg",
@@ -216,6 +254,49 @@
     };
     reader.onerror = () => setStatus("file read failed", "error");
     reader.readAsDataURL(file);
+  }
+
+  function readVideoFile(file) {
+    if ((file.size || 0) > MAX_VIDEO_BYTES) {
+      setStatus("video too large (max 25 MB)", "error");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = String(e.target.result || "");
+      const b64 = dataUrl.split(",", 2)[1] || "";
+      // Single-attachment rule: picking a video clears any image.
+      state.image = null;
+      state.video = {
+        base64: b64,
+        mime_type: "video/mp4",
+        name: file.name || "video.mp4",
+        size: file.size || b64.length,
+      };
+      $("fixture-select").value = "";
+      showPreview();
+      setStatus(`video attached · ${state.video.name}`, "ok");
+      probeVideoDuration(dataUrl);
+    };
+    reader.onerror = () => setStatus("file read failed", "error");
+    reader.readAsDataURL(file);
+  }
+
+  function probeVideoDuration(dataUrl) {
+    try {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.onloadedmetadata = () => {
+        if (state.video && isFinite(v.duration)) {
+          state.video.duration_s = v.duration;
+          showPreview();
+        }
+        try { v.removeAttribute("src"); v.load(); } catch (_) { /* ignore */ }
+      };
+      v.onerror = () => { /* best-effort, swallow */ };
+      v.src = dataUrl;
+    } catch (e) { /* best-effort, swallow */ }
   }
 
   // ─── composer (textarea autosize, enter, paste, drag) ─────
@@ -238,9 +319,17 @@
     msgs.scrollTop = msgs.scrollHeight;
   }
 
-  function renderUserMessage(text, image) {
+  function renderUserMessage(text, image, video) {
     const card = el("div", { class: "msg-card" });
-    if (image) {
+    if (video) {
+      const vid = el("video", {
+        class: "msg-video",
+        src: `data:${video.mime_type};base64,${video.base64}`,
+        controls: "",
+        preload: "metadata",
+      });
+      card.appendChild(vid);
+    } else if (image) {
       const img = el("img", {
         class: "msg-thumb",
         src: `data:${image.mime_type};base64,${image.base64}`,
@@ -255,7 +344,8 @@
     appendMessage(wrap);
   }
 
-  function renderAgentError(status, text) {
+  function renderAgentError(status, text, opts) {
+    opts = opts || {};
     const card = el("div", { class: "msg-card" });
     card.appendChild(el("div", {
       class: "msg-role-tag",
@@ -263,9 +353,10 @@
     }));
     card.appendChild(el("div", {
       class: "msg-text",
-      text: text || "request failed",
+      text: opts.message || text || "request failed",
     }));
-    const wrap = el("div", { class: "msg msg-agent msg-error" }, [card]);
+    const cls = "msg msg-agent msg-error" + (opts.errorCard ? " error-card" : "");
+    const wrap = el("div", { class: cls }, [card]);
     appendMessage(wrap);
   }
 
