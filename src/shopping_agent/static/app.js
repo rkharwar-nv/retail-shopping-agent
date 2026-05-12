@@ -174,12 +174,15 @@
   }
 
   // ─── image attachment ─────────────────────────────────────
+  // Composer shows a minimal inline chip: "📎 filename · size  ✕".
+  // The <img id="preview-img"> tag is kept in the HTML for ID
+  // compatibility but hidden in CSS — the chat bubble (rendered in
+  // renderUserMessage) is where the actual image thumbnail appears.
   function showPreview() {
     if (!state.image) return;
-    const url = `data:${state.image.mime_type};base64,${state.image.base64}`;
-    $("preview-img").src = url;
+    $("preview-img").removeAttribute("src");
     $("preview-name").textContent =
-      `${state.image.name} · ${fmtBytes(state.image.size)}`;
+      `📎 ${state.image.name} · ${fmtBytes(state.image.size)}`;
     $("composer-preview").hidden = false;
   }
 
