@@ -152,3 +152,30 @@ are tolerated but not promoted in the UI's example prompts.
   capped to 30s, encoded as fragmented MP4 in-browser.
 - Multi-video turns (two videos as a before/after comparison).
 - Server-side persistence for replay / debug-trace deep-dives.
+- **Sign-language recognition** (see §11 findings below). Either
+  route signed videos to a different model, integrate a sign-
+  language recognition tool the agent can call, or build a
+  graceful "I see you're signing" fallback that asks the user
+  to type or upload a written list.
+
+## 11. Findings — 2026-05-12 probe
+
+Verified against build.nvidia.com NIM (Nemotron 3 Nano Omni) using
+`scripts/probe_video.py`, `scripts/probe_video_http.py`, and
+`scripts/probe_asl.py`:
+
+- **Transport works.** MP4 base64 → `video_url` content blocks →
+  HTTP 200. Server-side frame sampling at fps=2 confirmed.
+- **Visual reasoning works.** Model produces accurate scene
+  descriptions and OCRs on-screen text overlays into
+  `detected_items`.
+- **ASL recognition does NOT work in Phase 1.** With explicit
+  "the person is signing ASL, translate to a list" prompting,
+  the reasoning trace shows the model speculating about
+  individual hand shapes (interpreting them as letters or
+  numbers) rather than fluently recognizing signed words. This
+  is a model capability gap, not a pipeline bug. Listed in
+  Phase-2 future work above.
+- **Audio-from-video is NOT implemented.** Even if the MP4 had
+  an audio track, our pipeline does not extract it. Tracked in
+  Phase-2 future work above.
